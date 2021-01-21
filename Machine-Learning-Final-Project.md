@@ -1,3 +1,8 @@
+Machine Learning Course Project
+===============================
+
+### by Eric Dregne
+
 Project Overview
 ----------------
 
