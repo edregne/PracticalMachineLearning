@@ -1,5 +1,4 @@
-# PracticalMachineLearning
-Coursework for practical machine learning
+# Practical Machine Learning - Final Project
 
 Review final project by following the below link.
 
