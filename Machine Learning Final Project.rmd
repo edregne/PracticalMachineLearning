@@ -1,0 +1,173 @@
+---
+title: "Practical Machine Learning Project"
+author: "Eric Dregne"
+date: "1/16/2021"
+output: html_document
+---
+
+## Project Overview
+
+The goal of this project is to use machine learning to develop a predictive model for the manner in which exercise was performed. The data utilized in this case is the Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. The data from this study, gathered from participants wearing movement sensors on different parts of the body, provides a wide range of information on specific movements during different manners of exercise, in this case the class of the exercise. Through modeling this data we will develop the means to determine the class of exercise performed from given data inputs.
+
+## Data Import and Preliminary Analysis
+
+Here we will load the Weight Lifting Exercise Dataset from the study. The basic structure of the data will be assessed and we will also load the R packages necessary for the project.
+
+```{r libs, warning=FALSE, message=FALSE}
+library(caret)
+library(knitr)
+library(randomForest)
+library(rattle)
+```
+
+```{r data}
+training_name <- "pml-training.csv"
+testing_name <- "pml-testing.csv"
+
+dataset_train <- read.csv(training_name, header = TRUE)
+dataset_test <- read.csv(testing_name, header = TRUE)
+
+dim(dataset_train)
+
+unique(dataset_train$classe)
+
+sapply(dataset_train, class)
+```
+
+## Preprocessing
+
+Here we will do our data partition that will be used to obtain the training set for our model. 
+
+```{r partition, echo=FALSE}
+set.seed(333)
+
+inTrain <- createDataPartition(dataset_train$classe, p=0.7, list=FALSE)
+training_set <- dataset_train[inTrain,]
+testing_set <- dataset_train[-inTrain,]
+
+dim(training_set)
+```
+
+The next step is determining how much of the data is missing. We will eliminate variables that have no data for 75% of their entries.
+
+```{r na}
+# Identify columns that are mostly NA
+
+train_na <- sapply(training_set, function(x) sum(is.na(x))>0.75*dim(training_set)[1])
+test_na <- sapply(testing_set, function(x) sum(is.na(x))>0.75*dim(testing_set)[1])
+
+# Remove columns that will not be used to make the model
+
+training_vars <- training_set[,train_na==FALSE]
+testing_vars <- testing_set[,test_na==FALSE]
+```
+
+The number of variables in the datasets are now `r dim(training_vars)[2]`. Values that are near zero will have no statistical value in our eventual predictions so we will remove these columns as well. 
+
+```{r nzv}
+# Remove values with near zero variance
+training_nzv <- nearZeroVar(training_vars)
+length(training_nzv)
+train_df <- training_vars[,-training_nzv]
+testing_nzv <- nearZeroVar(testing_vars)
+length(testing_nzv)
+test_df <- testing_vars[,-testing_nzv]
+```
+
+Finally, we will remove the descriptive data, participant id, timestamp, etc, that will not be factored into the predictions. 
+
+```{r descriptors}
+train_df <- train_df[,-(1:5)]
+test_df <- test_df[,-(1:5)]
+```
+
+Check for missing data.
+
+```{r check}
+sum(is.na(train_df))
+sum(is.na(test_df))
+```
+
+## Identifying Principle Components
+
+With unnecessary values removed from the data we will now search for variables that will be highly influential for our model. We'll get a quick percentage overview of what portion of each class is in the data.
+
+```{r class}
+classe_percent <- prop.table(table(train_df$classe)) * 100
+cbind(freq=table(train_df$classe), percentage=classe_percent)
+```
+
+Next, we'll look and see which variables are highly coorelated.
+
+```{r corcheck}
+M <- abs(cor(train_df[,-54]))
+diag(M) <- 0
+which(M > 0.8, arr.ind = T)
+```
+
+This initial check doesn't reveal any one variable that stands out as more correlated than the other so we cannot eliminate any variables at this time. Given the large number of variables we will be processing, the random forest method will be used.
+
+## Random Forest
+
+Using random forest, the class of exercise will be factored and we will see how many prediction errors are present when using the current data.
+
+```{r forest}
+train_rf <- randomForest(factor(classe)~.,data = train_df, proximity=TRUE)
+
+par(mfrow=c(1,2))
+plot(train_rf, main = "Class Errors")
+varImpPlot(train_rf, main = "Variable Importance")
+```
+
+Plotting the importance of each value, the variable num_window clearly has the strongest impact on the accuracy of the model. Nonetheless, no variable listed as an accuracy impact near zero. For this reason, no more variables will be removed.
+
+The error rate demonstrated for each class value also indicates there is no improvement in accuracy for any value at more than 200 trees. We'll create our initial model using rpart and 5 fold cross validation while also visualizing the decision tree below.
+
+```{r }
+modFit <- train(classe~., method="rpart", data=train_df, trControl=trainControl(method="cv", number=5))
+
+fancyRpartPlot(modFit$finalModel, sub="")
+
+print(modFit$finalModel)
+```
+
+
+```{r predictions}
+preds <- predict(modFit, newdata = test_df)
+confusionMatrix(preds, factor(test_df$classe))
+```
+
+The rpart model generated has very limited accuracy (49%) when run on the test data. We'll use random forest to create our second model again using 5 fold cross validation. 
+
+```{r rf}
+modFit2 <- train(classe~., data=train_df, method="rf", trControl=trainControl(method="cv", number=5))
+modFit2
+```
+
+We now have a model with greater than 99% accuracy. We'll now test the effectiveness of the model by running it on our test set.
+
+```{r validation}
+preds2 <- predict(modFit2, newdata = test_df)
+confusionMatrix(preds2, factor(test_df$classe))
+```
+The accuracy of the predictions are exceptional. The positive and negative prediction rate for the test data is almost 99% accurate across all class types with an out-of-sample error of just ~0.4% for all of the predictions.
+
+## Testing Quiz
+
+Our final model will now use the test set included for the final quiz. 
+
+```{r quiz}
+preds3 <- predict(modFit2, newdata=dataset_test)
+preds3
+
+```
+
+Our model answers the 20 quiz questions with 100% accuracy. 
+
+## Bibliography
+
+**Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements**
+  Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing:               Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian         Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes   in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN                  978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6.
+  Cited by 85 (Google Scholar)
+
+**Read more:** http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335#ixzz6kDAovb7F
